@@ -1,3 +1,6 @@
+/// specifies the ID of the VF register which is often used for flags
+const FLAG_REG_ID: u8 = 0xF;
+
 pub struct CPU {
     registers: [u8; 16],
     program_counter: u16,
@@ -63,7 +66,7 @@ impl CPU {
         self.registers[x_reg_id as usize] = value;
 
         // set carry flag
-        self.registers[0xF] = if carry { 1 } else { 0 };
+        self.registers[FLAG_REG_ID as usize] = if carry { 1 } else { 0 };
     }
 
     /// **NOTE:** in comparison to the `add_y_to_x()` method, this one **does not** set a carry flag, thus not affecting the VF register
@@ -72,6 +75,33 @@ impl CPU {
 
         let (value, _) = arg_1.overflowing_add(const_val);
         self.registers[x_reg_id as usize] = value;
+    }
+
+    /// **NOTE:** if the operation results in an underflow (when there is a borrow), the VF register is set to 0, otherwise it is set to 1
+    fn subtract_y_from_x(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        let arg_1 = self.registers[x_reg_id as usize];
+        let arg_2 = self.registers[y_reg_id as usize];
+
+        let (value, underflow) = arg_1.overflowing_sub(arg_2);
+
+        self.registers[x_reg_id as usize] = value;
+
+        // set underflow flag
+        self.registers[FLAG_REG_ID as usize] = if underflow { 0 } else { 1 };
+    }
+
+    /// * **NOTE_1:** even though the method subtracts **`x`** from **`y`**, the result is still stored in **`x`**
+    /// * **NOTE_2:** if the operation results in an underflow (when there is a borrow), the VF register is set to 0, otherwise it is set to 1
+    fn subtract_x_from_y(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        let arg_1 = self.registers[x_reg_id as usize];
+        let arg_2 = self.registers[y_reg_id as usize];
+
+        let (value, underflow) = arg_2.overflowing_sub(arg_1);
+
+        self.registers[x_reg_id as usize] = value;
+
+        // set underflow flag
+        self.registers[FLAG_REG_ID as usize] = if underflow { 0 } else { 1 };
     }
 
     pub fn run(&mut self) {
@@ -100,6 +130,8 @@ impl CPU {
             match (opcode_group, x_reg_id, y_reg_id, opcode_subgroup) {
                 (0, 0, 0, 0) => return (),
                 (0x8, _, _, 0x4) => self.add_y_to_x(x_reg_id, y_reg_id),
+                (0x8, _, _, 0x5) => self.subtract_y_from_x(x_reg_id, y_reg_id),
+                (0x8, _, _, 0x7) => self.subtract_x_from_y(x_reg_id, y_reg_id),
                 (0x7, _, _, _) => self.add_const_to_x(x_reg_id, const_val),
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
@@ -141,7 +173,7 @@ mod tests {
         // verify result
         assert_eq!(cpu.registers[0], 12, "failed to correctly add the two registers; a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
 
-        let vf_register = &cpu.registers[0xF];
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
         assert_eq!(*vf_register, 0, "failed to correctly set the carry bit; VF register: 0x{:02x}", vf_register);
     }
 
@@ -163,7 +195,7 @@ mod tests {
         // verify result
         assert_eq!(cpu.registers[0], 0, "failed to correctly add the two registers; a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
 
-        let vf_register = &cpu.registers[0xF];
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
         assert_eq!(*vf_register, 1, "failed to correctly set the carry bit; VF register: 0x{:02x}", vf_register);
     }
 
@@ -184,5 +216,93 @@ mod tests {
 
         // verify result
         assert_eq!(cpu.registers[0], 12, "failed to correctly add a constant and a register; a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
+    }
+
+    #[test]
+    fn subtract_y_from_x() {
+        let mut cpu = CPU::new();
+
+        let val_1 = 8;
+        let val_2 = 3;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8015, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 5, "failed to correctly subtract the two registers (result = a - b); a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 1, "failed to correctly set the underflow bit; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn subtract_y_from_x_with_underflow() {
+        let mut cpu = CPU::new();
+
+        let val_1 = 8;
+        let val_2 = 10;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8015, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 254, "failed to correctly subtract the two registers (result = a - b); a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 0, "failed to correctly set the underflow bit; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn subtract_x_from_y() {
+        let mut cpu = CPU::new();
+
+        let val_1 = 3;
+        let val_2 = 8;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8017, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 5, "failed to correctly subtract the two registers (result = b - a); a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 1, "failed to correctly set the underflow bit; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn subtract_x_from_y_with_underflow() {
+        let mut cpu = CPU::new();
+
+        let val_1 = 10;
+        let val_2 = 8;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8017, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 254, "failed to correctly subtract the two registers (result = b - a); a: {}, b: {}, result: {}", val_1, val_2, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 0, "failed to correctly set the underflow bit; VF register: 0x{:02x}", vf_register);
     }
 }
