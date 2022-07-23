@@ -104,6 +104,14 @@ impl CPU {
         self.registers[FLAG_REG_ID as usize] = if underflow { 0 } else { 1 };
     }
 
+    fn assign_const_to_x(&mut self, x_reg_id: u8, const_val: u8) {
+        self.registers[x_reg_id as usize] = const_val;
+    }
+
+    fn assign_y_to_x(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        self.registers[x_reg_id as usize] = self.registers[y_reg_id as usize];
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -133,6 +141,8 @@ impl CPU {
                 (0x8, _, _, 0x5) => self.subtract_y_from_x(x_reg_id, y_reg_id),
                 (0x8, _, _, 0x7) => self.subtract_x_from_y(x_reg_id, y_reg_id),
                 (0x7, _, _, _) => self.add_const_to_x(x_reg_id, const_val),
+                (0x6, _, _, _) => self.assign_const_to_x(x_reg_id, const_val),
+                (0x8, _, _, 0x0) => self.assign_y_to_x(x_reg_id, y_reg_id),
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
         }
@@ -304,5 +314,37 @@ mod tests {
 
         let vf_register = &cpu.registers[FLAG_REG_ID as usize];
         assert_eq!(*vf_register, 0, "failed to correctly set the underflow bit; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn assign_const_to_x() {
+        let mut cpu = CPU::new();
+
+        let val_1= 0x15;
+
+        // load opcodes
+        let opcode: u16 = (0x6000 as u16) | val_1;
+        cpu.load_opcode_into_memory(opcode, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 21, "failed to correctly assign constant to register; constant: {}, reg: {}", val_1, cpu.registers[0]);
+    }
+
+    #[test]
+    fn assign_y_to_x() {
+        let mut cpu = CPU::new();
+
+        let val_1 = 10;
+
+        // load registers
+        cpu.load_register(1, val_1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8010, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], 10, "failed to correctly assign register y to register x; reg_y: {}, reg_x: {}", val_1, cpu.registers[0]);
     }
 }
