@@ -1,3 +1,5 @@
+use crate::stack::Stack;
+
 /// specifies the ID of the VF register which is often used for flags
 const FLAG_REG_ID: u8 = 0xF;
 
@@ -7,10 +9,13 @@ pub struct CPU {
     // position in memory
     program_counter: u16,
 
+    // 4096 bytes of memory
     memory: [u8; 0x1000],
 
     /// specifies if the Y register is loaded into X before doing bit-shift operations or not
     assign_before_shift: bool,
+
+    stack: Stack,
 }
 
 impl CPU {
@@ -20,6 +25,7 @@ impl CPU {
             program_counter: 0x0,
             memory: [0; 0x1000],
             assign_before_shift,
+            stack: Stack::new(),
         };
     }
 
@@ -232,6 +238,8 @@ impl CPU {
                 (0x4, _, _, _) => self.skip_if_x_not_equals_const(x_reg_id, const_val),
                 (0x5, _, _, 0x0) => self.skip_if_x_equals_y(x_reg_id, y_reg_id),
                 (0x9, _, _, 0x0) => self.skip_if_x_not_equals_y(x_reg_id, y_reg_id),
+
+                // flow-control
 
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }

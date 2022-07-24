@@ -1,3 +1,4 @@
+pub mod stack;
 mod cpu;
 
 use crate::cpu::CPU;
