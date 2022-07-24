@@ -14,7 +14,7 @@ impl Stack {
         };
     }
 
-    fn pop(&mut self) -> u16 {
+    pub fn pop(&mut self) -> u16 {
         if self.stack_pointer <= 0 {
             panic!("stack underflow!");
         }
@@ -23,7 +23,7 @@ impl Stack {
         return self.memory[self.stack_pointer as usize];
     }
 
-    fn push(&mut self, return_address: u16) {
+    pub fn push(&mut self, return_address: u16) {
         if (self.stack_pointer as usize) >= self.memory.len() {
             panic!("stack overflow!");
         }

@@ -192,6 +192,16 @@ impl CPU {
         }
     }
 
+    fn call_subroutine(&mut self, address: u16) {
+        self.stack.push(self.program_counter);
+        self.program_counter = address;
+    }
+
+    fn return_from_subroutine(&mut self) {
+        let address: u16 = self.stack.pop();
+        self.program_counter = address;
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -240,6 +250,9 @@ impl CPU {
                 (0x9, _, _, 0x0) => self.skip_if_x_not_equals_y(x_reg_id, y_reg_id),
 
                 // flow-control
+                // TODO: unit tests
+                (0x0, 0x0, 0xE, 0xE) => self.return_from_subroutine(),
+                (0x2, _, _, _) => self.call_subroutine(address),
 
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
@@ -621,5 +634,31 @@ mod tests {
 
         // verify result
         assert_eq!(cpu.registers[0], val_1, "failed to correctly perform the if(VX != VY) operation");
+    }
+
+    #[test]
+    fn call_and_return_from_subroutine() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+        let val_2 = 7;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        let main_opcodes: Vec<u16> = vec!(0x2100, 0x8014);
+        cpu.load_opcodes_into_memory(&main_opcodes, 0x0);
+
+        let subroutine_opcodes: Vec<u16> = vec!(0x8104, 0x00EE);
+        cpu.load_opcodes_into_memory(&subroutine_opcodes, 0x100);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[1], val_1 + val_2, "failed to correctly call subroutine");
+
+        assert_eq!(cpu.registers[0], val_1 * 2 + val_2, "failed to correctly return from subroutine");
     }
 }
