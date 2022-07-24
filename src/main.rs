@@ -3,7 +3,7 @@ mod cpu;
 use crate::cpu::CPU;
 
 fn main() {
-    let mut cpu: CPU = CPU::new();
+    let mut cpu: CPU = CPU::new(true);
 
     // load registers
     let register_values: [u8; 16] = [5, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];

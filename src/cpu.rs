@@ -3,18 +3,23 @@ const FLAG_REG_ID: u8 = 0xF;
 
 pub struct CPU {
     registers: [u8; 16],
-    program_counter: u16,
 
     // position in memory
+    program_counter: u16,
+
     memory: [u8; 0x1000],
+
+    /// specifies if the Y register is loaded into X before doing bit-shift operations or not
+    assign_before_shift: bool,
 }
 
 impl CPU {
-    pub fn new() -> CPU {
+    pub fn new(assign_before_shift: bool) -> CPU {
         return CPU {
             registers: [0; 16],
             program_counter: 0x0,
             memory: [0; 0x1000],
+            assign_before_shift,
         };
     }
 
@@ -90,8 +95,8 @@ impl CPU {
         self.registers[FLAG_REG_ID as usize] = if underflow { 0 } else { 1 };
     }
 
-    /// * **NOTE_1:** even though the method subtracts **`x`** from **`y`**, the result is still stored in **`x`**
-    /// * **NOTE_2:** if the operation results in an underflow (when there is a borrow), the VF register is set to 0, otherwise it is set to 1
+    /// - **NOTE_1:** even though the method subtracts **`x`** from **`y`**, the result is still stored in **`x`**
+    /// - **NOTE_2:** if the operation results in an underflow (when there is a borrow), the VF register is set to 0, otherwise it is set to 1
     fn subtract_x_from_y(&mut self, x_reg_id: u8, y_reg_id: u8) {
         let arg_1 = self.registers[x_reg_id as usize];
         let arg_2 = self.registers[y_reg_id as usize];
@@ -122,6 +127,34 @@ impl CPU {
 
     fn bitwise_xor_x_y(&mut self, x_reg_id: u8, y_reg_id: u8) {
         self.registers[x_reg_id as usize] ^= self.registers[y_reg_id as usize];
+    }
+
+    /// shifts the X register 1 position to the right
+    ///  - VF is set to the value of the least-significant-bit before the shift operation
+    ///  - the `assign_before_shift` bool, which can be configured on creation, specifies whether the Y register is loaded into the X register before doing the shift operation
+    fn right_bit_shift(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        if self.assign_before_shift {
+            self.assign_y_to_x(x_reg_id, y_reg_id);
+        }
+
+        // set VF to LSB
+        self.registers[FLAG_REG_ID as usize] = self.registers[x_reg_id as usize] & (0x01 as u8);
+
+        self.registers[x_reg_id as usize] >>= 1;
+    }
+
+    /// shifts the X register 1 position to the left
+    ///  - VF is set to the value of the most-significant-bit before the shift operation
+    ///  - the `assign_before_shift` bool, which can be configured on creation, specifies whether the Y register is loaded into the X register before doing the shift operation
+    fn left_bit_shift(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        if self.assign_before_shift {
+            self.assign_y_to_x(x_reg_id, y_reg_id);
+        }
+
+        // set VF to LSB
+        self.registers[FLAG_REG_ID as usize] = (self.registers[x_reg_id as usize] & (0x80 as u8)) >> 7;
+
+        self.registers[x_reg_id as usize] <<= 1;
     }
 
     pub fn run(&mut self) {
@@ -162,6 +195,8 @@ impl CPU {
                 (0x8, _, _, 0x1) => self.bitwise_or_x_y(x_reg_id, y_reg_id),
                 (0x8, _, _, 0x2) => self.bitwise_and_x_y(x_reg_id, y_reg_id),
                 (0x8, _, _, 0x3) => self.bitwise_xor_x_y(x_reg_id, y_reg_id),
+                (0x8, _, _, 0x6) => self.right_bit_shift(x_reg_id, y_reg_id),
+                (0x8, _, _, 0xE) => self.left_bit_shift(x_reg_id, y_reg_id),
 
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
@@ -187,7 +222,7 @@ mod tests {
 
     #[test]
     fn add_xy() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -209,7 +244,7 @@ mod tests {
 
     #[test]
     fn add_xy_with_carry() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 1;
         let val_2 = 255;
@@ -231,7 +266,7 @@ mod tests {
 
     #[test]
     fn add_const_to_x() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -250,7 +285,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 8;
         let val_2 = 3;
@@ -272,7 +307,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x_with_underflow() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 8;
         let val_2 = 10;
@@ -294,7 +329,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 3;
         let val_2 = 8;
@@ -316,7 +351,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y_with_underflow() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 10;
         let val_2 = 8;
@@ -338,7 +373,7 @@ mod tests {
 
     #[test]
     fn assign_const_to_x() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1: u8 = 0x15;
 
@@ -353,7 +388,7 @@ mod tests {
 
     #[test]
     fn assign_y_to_x() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 10;
 
@@ -370,7 +405,7 @@ mod tests {
 
     #[test]
     fn bitwise_or_x_y() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 10;
         let val_2 = 15;
@@ -389,7 +424,7 @@ mod tests {
 
     #[test]
     fn bitwise_and_x_y() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 64;
         let val_2 = 15;
@@ -408,7 +443,7 @@ mod tests {
 
     #[test]
     fn bitwise_xor_x_y() {
-        let mut cpu = CPU::new();
+        let mut cpu = CPU::new(true);
 
         let val_1 = 65;
         let val_2 = 15;
@@ -423,5 +458,45 @@ mod tests {
 
         // verify result
         assert_eq!(cpu.registers[0], (val_1 ^ val_2), "failed to correctly perform the bitwise XOR operation on 2 registers; val_1: {}, val_2: {}, result: {}", val_1, val_2, cpu.registers[0]);
+    }
+
+    #[test]
+    fn right_bit_shift() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 65;
+
+        // load registers
+        cpu.load_register(1, val_1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x8016, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1 >> 1, "failed to correctly perform the right bit-shift operation; val_1: {}, result: {}", val_1, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 1, "failed to correctly load the LSB into VF; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn left_bit_shift() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 255;
+
+        // load registers
+        cpu.load_register(1, val_1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x801E, 0x0);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1 << 1, "failed to correctly perform the left bit-shift operation; val_1: {}, result: {}", val_1, cpu.registers[0]);
+
+        let vf_register = &cpu.registers[FLAG_REG_ID as usize];
+        assert_eq!(*vf_register, 1, "failed to correctly load the LSB into VF; VF register: 0x{:02x}", vf_register);
     }
 }
