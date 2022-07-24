@@ -157,6 +157,35 @@ impl CPU {
         self.registers[x_reg_id as usize] <<= 1;
     }
 
+    fn skip_if_x_equals_const(&mut self, x_reg_id: u8, const_val: u8) {
+        let x_reg = &self.registers[x_reg_id as usize];
+        if *x_reg == const_val {
+            self.program_counter += 2;
+        }
+    }
+
+    fn skip_if_x_not_equals_const(&mut self, x_reg_id: u8, const_val: u8) {
+        let x_reg = &self.registers[x_reg_id as usize];
+        if *x_reg != const_val {
+            self.program_counter += 2;
+        }
+    }
+
+    fn skip_if_x_equals_y(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        let x_reg = &self.registers[x_reg_id as usize];
+        let y_reg = &self.registers[y_reg_id as usize];
+        if *x_reg == *y_reg {
+            self.program_counter += 2;
+        }
+    }
+    fn skip_if_x_not_equals_y(&mut self, x_reg_id: u8, y_reg_id: u8) {
+        let x_reg = &self.registers[x_reg_id as usize];
+        let y_reg = &self.registers[y_reg_id as usize];
+        if *x_reg != *y_reg {
+            self.program_counter += 2;
+        }
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -197,6 +226,12 @@ impl CPU {
                 (0x8, _, _, 0x3) => self.bitwise_xor_x_y(x_reg_id, y_reg_id),
                 (0x8, _, _, 0x6) => self.right_bit_shift(x_reg_id, y_reg_id),
                 (0x8, _, _, 0xE) => self.left_bit_shift(x_reg_id, y_reg_id),
+
+                // conditional-skips
+                (0x3, _, _, _) => self.skip_if_x_equals_const(x_reg_id, const_val),
+                (0x4, _, _, _) => self.skip_if_x_not_equals_const(x_reg_id, const_val),
+                (0x5, _, _, 0x0) => self.skip_if_x_equals_y(x_reg_id, y_reg_id),
+                (0x9, _, _, 0x0) => self.skip_if_x_not_equals_y(x_reg_id, y_reg_id),
 
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
@@ -498,5 +533,85 @@ mod tests {
 
         let vf_register = &cpu.registers[FLAG_REG_ID as usize];
         assert_eq!(*vf_register, 1, "failed to correctly load the LSB into VF; VF register: 0x{:02x}", vf_register);
+    }
+
+    #[test]
+    fn skip_if_x_equals_const() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+
+        // load registers
+        cpu.load_register(0, val_1);
+
+        // load opcodes
+        let opcode: u16 = (0x3000 as u16) | (val_1 as u16);
+        cpu.load_opcode_into_memory(opcode, 0x0);
+        // if the skip fails, V0 is set to 0x11
+        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1, "failed to correctly perform the if(VX == NN) operation");
+    }
+
+    #[test]
+    fn skip_if_x_not_equals_const() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+
+        // load registers
+        cpu.load_register(0, val_1);
+
+        // load opcodes
+        let opcode: u16 = (0x4000 as u16) | ((val_1 + 1) as u16);
+        cpu.load_opcode_into_memory(opcode, 0x0);
+        // if the skip fails, V0 is set to 0x11
+        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1, "failed to correctly perform the if(VX != NN) operation");
+    }
+
+    #[test]
+    fn skip_if_x_equals_y() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x5010, 0x0);
+        // if the skip fails, V0 is set to 0x11
+        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1, "failed to correctly perform the if(VX == VY) operation");
+    }
+
+    #[test]
+    fn skip_if_x_not_equals_y() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_1 + 1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x9010, 0x0);
+        // if the skip fails, V0 is set to 0x11
+        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[0], val_1, "failed to correctly perform the if(VX != VY) operation");
     }
 }
