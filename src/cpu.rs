@@ -202,6 +202,15 @@ impl CPU {
         self.program_counter = address;
     }
 
+    fn jump_to_address(&mut self, address: u16) {
+        self.program_counter = address;
+    }
+
+    /// jumps to V0 + address
+    fn jump_to_address_with_displacement(&mut self, address: u16) {
+        self.jump_to_address(address + (self.registers[0x0] as u16));
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -252,7 +261,9 @@ impl CPU {
                 // flow-control
                 // TODO: unit tests
                 (0x0, 0x0, 0xE, 0xE) => self.return_from_subroutine(),
+                (0x1, _, _, _) => self.jump_to_address(address),
                 (0x2, _, _, _) => self.call_subroutine(address),
+                (0xB, _, _, _) => self.jump_to_address_with_displacement(address),
 
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
@@ -660,5 +671,47 @@ mod tests {
         assert_eq!(cpu.registers[1], val_1 + val_2, "failed to correctly call subroutine");
 
         assert_eq!(cpu.registers[0], val_1 * 2 + val_2, "failed to correctly return from subroutine");
+    }
+
+    #[test]
+    fn jump_to_address() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+        let val_2 = 7;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0x2100, 0x0);
+        cpu.load_opcode_into_memory(0x8104, 0x100);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[1], val_1 + val_2, "failed to correctly execute jump");
+    }
+
+    #[test]
+    fn jump_to_address_with_displacement() {
+        let mut cpu = CPU::new(true);
+
+        let val_1 = 5;
+        let val_2 = 7;
+
+        // load registers
+        cpu.load_register(0, val_1);
+        cpu.load_register(1, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0xB0FB, 0x0);
+        cpu.load_opcode_into_memory(0x8104, 0x100);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.registers[1], val_1 + val_2, "failed to correctly execute jump");
     }
 }
