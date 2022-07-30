@@ -3,6 +3,12 @@ use crate::stack::Stack;
 /// specifies the ID of the VF register which is often used for flags
 const FLAG_REG_ID: u8 = 0xF;
 
+/// specifies the address where the font data is stored in memory
+const FONT_START_ADDRESS: u16 = 0x050;
+
+/// specifies the address where the program is stored in memory
+pub const PROGRAM_START_ADDRESS: u16 = 0x200;
+
 pub struct CPU {
     registers: [u8; 16],
 
@@ -15,17 +21,25 @@ pub struct CPU {
     /// specifies if the Y register is loaded into X before doing bit-shift operations or not
     assign_before_shift: bool,
 
+    /// sets VF to 1 if I overflows from 0FFF to above 0x1000 (outside the normal addressing space)
+    set_flag_on_index_overflow: bool,
+
     stack: Stack,
+
+    /// aka. the I register (used to point at locations in memory)
+    index_reg: u16,
 }
 
 impl CPU {
-    pub fn new(assign_before_shift: bool) -> CPU {
+    pub fn new(assign_before_shift: bool, set_flag_on_index_overflow: bool) -> CPU {
         return CPU {
             registers: [0; 16],
-            program_counter: 0x0,
+            program_counter: PROGRAM_START_ADDRESS,
             memory: [0; 0x1000],
             assign_before_shift,
+            set_flag_on_index_overflow,
             stack: Stack::new(),
+            index_reg: 0x0,
         };
     }
 
@@ -58,8 +72,24 @@ impl CPU {
         }
     }
 
+    pub fn load_font_into_memory(&mut self, font_data: [[u8; 5]; 16]) {
+        let mut address: u16 = FONT_START_ADDRESS;
+        for character in font_data {
+            for byte in character {
+                self.memory[address as usize] = byte;
+                address += 1;
+            }
+        }
+
+        assert_eq!(address, 0xA0);
+    }
+
     pub fn load_register(&mut self, reg_id: u8, value: u8) {
         self.registers[reg_id as usize] = value;
+    }
+
+    pub fn load_index_reg(&mut self, address: u16) {
+        self.set_index_reg(address);
     }
 
     pub fn load_registers(&mut self, values: &[u8; 16]) {
@@ -211,6 +241,27 @@ impl CPU {
         self.jump_to_address(address + (self.registers[0x0] as u16));
     }
 
+    fn set_index_reg(&mut self, address: u16) {
+        self.index_reg = address;
+    }
+
+    /// **NOTE:** if the `set_flag_on_index_overflow` bool is set to `true`,
+    /// then in case of the index register moving outside the normal addressing range (`0x1000`), VF is set to `1`
+    fn add_x_to_index(&mut self, x_reg_id: u8) {
+        self.index_reg += self.registers[x_reg_id as usize] as u16;
+
+        // set overflow flag
+        if self.set_flag_on_index_overflow && self.index_reg > 0x1000 {
+            self.registers[FLAG_REG_ID as usize] = 1;
+        }
+    }
+
+    fn set_index_to_char_font(&mut self, x_reg_id: u8) {
+        // reduce to the least significant nibble
+        let character = self.registers[x_reg_id as usize] & 0xF;
+        self.index_reg = FONT_START_ADDRESS + (character as u16) * 5;
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -265,6 +316,11 @@ impl CPU {
                 (0x2, _, _, _) => self.call_subroutine(address),
                 (0xB, _, _, _) => self.jump_to_address_with_displacement(address),
 
+                // memory control
+                (0xA, _, _, _) => self.set_index_reg(address),
+                (0xF, _, 0x1, 0xE) => self.add_x_to_index(x_reg_id),
+                (0xF, _, 0x2, 0x9) => self.set_index_to_char_font(x_reg_id),
+
                 _ => todo!("opcode {:04x} is not implemented yet!", opcode)
             }
         }
@@ -289,7 +345,7 @@ mod tests {
 
     #[test]
     fn add_xy() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -299,7 +355,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8014, 0x0);
+        cpu.load_opcode_into_memory(0x8014, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -311,7 +367,7 @@ mod tests {
 
     #[test]
     fn add_xy_with_carry() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 1;
         let val_2 = 255;
@@ -321,7 +377,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8014, 0x0);
+        cpu.load_opcode_into_memory(0x8014, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -333,7 +389,7 @@ mod tests {
 
     #[test]
     fn add_const_to_x() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -343,7 +399,7 @@ mod tests {
 
         // load opcodes
         let opcode: u16 = (0x7000 as u16) | (val_2 as u16);
-        cpu.load_opcode_into_memory(opcode, 0x0);
+        cpu.load_opcode_into_memory(opcode, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -352,7 +408,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 8;
         let val_2 = 3;
@@ -362,7 +418,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8015, 0x0);
+        cpu.load_opcode_into_memory(0x8015, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -374,7 +430,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x_with_underflow() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 8;
         let val_2 = 10;
@@ -384,7 +440,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8015, 0x0);
+        cpu.load_opcode_into_memory(0x8015, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -396,7 +452,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 3;
         let val_2 = 8;
@@ -406,7 +462,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8017, 0x0);
+        cpu.load_opcode_into_memory(0x8017, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -418,7 +474,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y_with_underflow() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 10;
         let val_2 = 8;
@@ -428,7 +484,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8017, 0x0);
+        cpu.load_opcode_into_memory(0x8017, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -440,13 +496,13 @@ mod tests {
 
     #[test]
     fn assign_const_to_x() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1: u8 = 0x15;
 
         // load opcodes
         let opcode: u16 = (0x6000 as u16) | (val_1 as u16);
-        cpu.load_opcode_into_memory(opcode, 0x0);
+        cpu.load_opcode_into_memory(opcode, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -455,7 +511,7 @@ mod tests {
 
     #[test]
     fn assign_y_to_x() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 10;
 
@@ -463,7 +519,7 @@ mod tests {
         cpu.load_register(1, val_1);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8010, 0x0);
+        cpu.load_opcode_into_memory(0x8010, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -472,7 +528,7 @@ mod tests {
 
     #[test]
     fn bitwise_or_x_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 10;
         let val_2 = 15;
@@ -482,7 +538,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8011, 0x0);
+        cpu.load_opcode_into_memory(0x8011, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -491,7 +547,7 @@ mod tests {
 
     #[test]
     fn bitwise_and_x_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 64;
         let val_2 = 15;
@@ -501,7 +557,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8012, 0x0);
+        cpu.load_opcode_into_memory(0x8012, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -510,7 +566,7 @@ mod tests {
 
     #[test]
     fn bitwise_xor_x_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 65;
         let val_2 = 15;
@@ -520,7 +576,7 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8013, 0x0);
+        cpu.load_opcode_into_memory(0x8013, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -529,7 +585,7 @@ mod tests {
 
     #[test]
     fn right_bit_shift() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 65;
 
@@ -537,7 +593,7 @@ mod tests {
         cpu.load_register(1, val_1);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x8016, 0x0);
+        cpu.load_opcode_into_memory(0x8016, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -549,7 +605,7 @@ mod tests {
 
     #[test]
     fn left_bit_shift() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 255;
 
@@ -557,7 +613,7 @@ mod tests {
         cpu.load_register(1, val_1);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x801E, 0x0);
+        cpu.load_opcode_into_memory(0x801E, PROGRAM_START_ADDRESS);
         cpu.run();
 
         // verify result
@@ -569,7 +625,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_equals_const() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
 
@@ -578,9 +634,9 @@ mod tests {
 
         // load opcodes
         let opcode: u16 = (0x3000 as u16) | (val_1 as u16);
-        cpu.load_opcode_into_memory(opcode, 0x0);
+        cpu.load_opcode_into_memory(opcode, PROGRAM_START_ADDRESS);
         // if the skip fails, V0 is set to 0x11
-        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.load_opcode_into_memory(0x6011, PROGRAM_START_ADDRESS + 2);
         cpu.run();
 
         // verify result
@@ -589,7 +645,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_not_equals_const() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
 
@@ -598,9 +654,9 @@ mod tests {
 
         // load opcodes
         let opcode: u16 = (0x4000 as u16) | ((val_1 + 1) as u16);
-        cpu.load_opcode_into_memory(opcode, 0x0);
+        cpu.load_opcode_into_memory(opcode, PROGRAM_START_ADDRESS);
         // if the skip fails, V0 is set to 0x11
-        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.load_opcode_into_memory(0x6011, PROGRAM_START_ADDRESS + 2);
         cpu.run();
 
         // verify result
@@ -609,7 +665,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_equals_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
 
@@ -618,9 +674,9 @@ mod tests {
         cpu.load_register(1, val_1);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x5010, 0x0);
+        cpu.load_opcode_into_memory(0x5010, PROGRAM_START_ADDRESS);
         // if the skip fails, V0 is set to 0x11
-        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.load_opcode_into_memory(0x6011, PROGRAM_START_ADDRESS + 2);
         cpu.run();
 
         // verify result
@@ -629,7 +685,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_not_equals_y() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
 
@@ -638,9 +694,9 @@ mod tests {
         cpu.load_register(1, val_1 + 1);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x9010, 0x0);
+        cpu.load_opcode_into_memory(0x9010, PROGRAM_START_ADDRESS);
         // if the skip fails, V0 is set to 0x11
-        cpu.load_opcode_into_memory(0x6011, 0x2);
+        cpu.load_opcode_into_memory(0x6011, PROGRAM_START_ADDRESS + 2);
         cpu.run();
 
         // verify result
@@ -649,7 +705,7 @@ mod tests {
 
     #[test]
     fn call_and_return_from_subroutine() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -659,11 +715,11 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        let main_opcodes: Vec<u16> = vec!(0x2100, 0x8014);
-        cpu.load_opcodes_into_memory(&main_opcodes, 0x0);
+        let main_opcodes: Vec<u16> = vec!(0x2300, 0x8014);
+        cpu.load_opcodes_into_memory(&main_opcodes, PROGRAM_START_ADDRESS);
 
         let subroutine_opcodes: Vec<u16> = vec!(0x8104, 0x00EE);
-        cpu.load_opcodes_into_memory(&subroutine_opcodes, 0x100);
+        cpu.load_opcodes_into_memory(&subroutine_opcodes, 0x300);
 
         cpu.run();
 
@@ -675,7 +731,7 @@ mod tests {
 
     #[test]
     fn jump_to_address() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -685,8 +741,8 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0x2100, 0x0);
-        cpu.load_opcode_into_memory(0x8104, 0x100);
+        cpu.load_opcode_into_memory(0x2300, PROGRAM_START_ADDRESS);
+        cpu.load_opcode_into_memory(0x8104, 0x300);
 
         cpu.run();
 
@@ -696,7 +752,7 @@ mod tests {
 
     #[test]
     fn jump_to_address_with_displacement() {
-        let mut cpu = CPU::new(true);
+        let mut cpu = CPU::new(true, true);
 
         let val_1 = 5;
         let val_2 = 7;
@@ -706,12 +762,66 @@ mod tests {
         cpu.load_register(1, val_2);
 
         // load opcodes
-        cpu.load_opcode_into_memory(0xB0FB, 0x0);
-        cpu.load_opcode_into_memory(0x8104, 0x100);
+        cpu.load_opcode_into_memory(0xB2FB, PROGRAM_START_ADDRESS);
+        cpu.load_opcode_into_memory(0x8104, 0x300);
 
         cpu.run();
 
         // verify result
         assert_eq!(cpu.registers[1], val_1 + val_2, "failed to correctly execute jump");
+    }
+
+    #[test]
+    fn set_index_reg() {
+        let mut cpu = CPU::new(true, true);
+
+        let val_1: u16 = 5;
+
+        // load opcodes
+        let opcode: u16 = (0xA000 as u16) | val_1;
+        cpu.load_opcode_into_memory(opcode, PROGRAM_START_ADDRESS);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.index_reg, val_1, "failed to correctly set the index register; index_reg: {}", cpu.index_reg);
+    }
+
+    #[test]
+    fn add_x_to_index() {
+        let mut cpu = CPU::new(true, true);
+
+        let val_1: u16 = 5;
+        let val_2: u8 = 7;
+
+        // load registers
+        cpu.load_index_reg(val_1);
+        cpu.load_register(0, val_2);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0xF01E, PROGRAM_START_ADDRESS);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.index_reg, val_1 + (val_2 as u16), "failed to correctly add to X to index register; index_reg: {}", cpu.index_reg);
+    }
+
+    #[test]
+    fn set_index_to_char_font() {
+        let mut cpu = CPU::new(true, true);
+
+        let val_1: u8 = 0xF;
+
+        // load registers
+        cpu.load_register(0, val_1);
+
+        // load opcodes
+        cpu.load_opcode_into_memory(0xF029, PROGRAM_START_ADDRESS);
+
+        cpu.run();
+
+        // verify result
+        assert_eq!(cpu.index_reg, FONT_START_ADDRESS + (15 * 5), "failed to correctly set the index register to the font location; index_reg: 0x{:04x}; character: 0x{:02x}", cpu.index_reg, val_1);
     }
 }
