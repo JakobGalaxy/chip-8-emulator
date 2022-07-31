@@ -1,4 +1,6 @@
+use std::{thread, time};
 use crate::stack::Stack;
+use crate::screen::Screen;
 
 /// specifies the ID of the VF register which is often used for flags
 const FLAG_REG_ID: u8 = 0xF;
@@ -16,7 +18,7 @@ pub struct CPU {
     program_counter: u16,
 
     // 4096 bytes of memory
-    memory: [u8; 0x1000],
+    pub memory: [u8; 0x1000],
 
     /// specifies if the Y register is loaded into X before doing bit-shift operations or not
     assign_before_shift: bool,
@@ -29,12 +31,14 @@ pub struct CPU {
 
     stack: Stack,
 
+    screen: Screen,
+
     /// aka. the I register (used to point at locations in memory)
     index_reg: u16,
 }
 
 impl CPU {
-    pub fn new(assign_before_shift: bool, set_flag_on_index_overflow: bool, modify_index_on_dump_or_load: bool) -> CPU {
+    pub fn new(screen: Screen, assign_before_shift: bool, set_flag_on_index_overflow: bool, modify_index_on_dump_or_load: bool) -> CPU {
         return CPU {
             registers: [0; 16],
             program_counter: PROGRAM_START_ADDRESS,
@@ -43,6 +47,7 @@ impl CPU {
             set_flag_on_index_overflow,
             modify_index_on_dump_or_load,
             stack: Stack::new(),
+            screen,
             index_reg: 0x0,
         };
     }
@@ -63,7 +68,7 @@ impl CPU {
 
     pub fn load_bytes_into_memory(&mut self, bytes: &Vec<u8>, address: u16) {
         for (idx, byte) in bytes.iter().enumerate() {
-            self.memory[(address as usize) + idx] = * byte;
+            self.memory[(address as usize) + idx] = *byte;
         }
     }
 
@@ -296,6 +301,21 @@ impl CPU {
         }
     }
 
+    fn display_sprite(&mut self, x_reg_id: u8, y_reg_id: u8, pixel_height: u8) {
+        let x_pos = self.registers[x_reg_id as usize];
+        let y_pos = self.registers[y_reg_id as usize];
+
+        let sprite_data = &self.memory[(self.index_reg as usize)..(self.index_reg as usize) + (pixel_height as usize)];
+
+        if self.screen.display_sprite(x_pos, y_pos, sprite_data) {
+            self.registers[FLAG_REG_ID as usize] = 1;
+        }
+    }
+
+    fn clear_screen(&mut self) {
+        self.screen.clear();
+    }
+
     pub fn run(&mut self) {
         loop {
             let opcode: u16 = self.read_opcode();
@@ -319,8 +339,12 @@ impl CPU {
             // constant (8 bit)
             let const_val: u8 = (opcode & 0x00FF) as u8;
 
+            // nibble constant (4 bit)
+            let nibble_const_val: u8 = (opcode & 0x000F) as u8;
+
             match (opcode_group, x_reg_id, y_reg_id, opcode_subgroup) {
-                (0, 0, 0, 0) => return (),
+                // stop execution on empty instruction
+                (0x0, 0x0, 0x0, 0x0) => return (),
 
                 // basic math
                 (0x8, _, _, 0x4) => self.add_y_to_x(x_reg_id, y_reg_id),
@@ -344,7 +368,6 @@ impl CPU {
                 (0x9, _, _, 0x0) => self.skip_if_x_not_equals_y(x_reg_id, y_reg_id),
 
                 // flow-control
-                // TODO: unit tests
                 (0x0, 0x0, 0xE, 0xE) => self.return_from_subroutine(),
                 (0x1, _, _, _) => self.jump_to_address(address),
                 (0x2, _, _, _) => self.call_subroutine(address),
@@ -357,8 +380,15 @@ impl CPU {
                 (0xF, _, 0x5, 0x5) => self.dump_registers_to_memory(x_reg_id),
                 (0xF, _, 0x6, 0x5) => self.load_registers_from_memory(x_reg_id),
 
-                _ => todo!("opcode {:04x} is not implemented yet!", opcode)
+                // display
+                (0xD, _, _, _) => self.display_sprite(x_reg_id, y_reg_id, nibble_const_val),
+                (0x0, 0x0, 0xE, 0x0) => self.clear_screen(),
+
+                _ => todo!("opcode {:04x} is not implemented yet!", opcode),
             }
+
+            thread::sleep(time::Duration::from_millis(10));
+            self.screen.update();
         }
     }
 
@@ -377,11 +407,20 @@ impl CPU {
 
 #[cfg(test)]
 mod tests {
+    use crate::SDLScreenUI;
     use super::*;
+
+    fn init_cpu() -> CPU {
+        let screen_ui = SDLScreenUI::new(10);
+        let screen = Screen::new(screen_ui);
+        let cpu = CPU::new(screen, true, true, false);
+
+        return cpu;
+    }
 
     #[test]
     fn add_xy() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
         let val_2 = 7;
@@ -403,7 +442,7 @@ mod tests {
 
     #[test]
     fn add_xy_with_carry() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 1;
         let val_2 = 255;
@@ -425,7 +464,7 @@ mod tests {
 
     #[test]
     fn add_const_to_x() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
         let val_2 = 7;
@@ -444,7 +483,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 8;
         let val_2 = 3;
@@ -466,7 +505,7 @@ mod tests {
 
     #[test]
     fn subtract_y_from_x_with_underflow() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 8;
         let val_2 = 10;
@@ -488,7 +527,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 3;
         let val_2 = 8;
@@ -510,7 +549,7 @@ mod tests {
 
     #[test]
     fn subtract_x_from_y_with_underflow() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 10;
         let val_2 = 8;
@@ -532,7 +571,7 @@ mod tests {
 
     #[test]
     fn assign_const_to_x() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1: u8 = 0x15;
 
@@ -547,7 +586,7 @@ mod tests {
 
     #[test]
     fn assign_y_to_x() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 10;
 
@@ -564,7 +603,7 @@ mod tests {
 
     #[test]
     fn bitwise_or_x_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 10;
         let val_2 = 15;
@@ -583,7 +622,7 @@ mod tests {
 
     #[test]
     fn bitwise_and_x_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 64;
         let val_2 = 15;
@@ -602,7 +641,7 @@ mod tests {
 
     #[test]
     fn bitwise_xor_x_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 65;
         let val_2 = 15;
@@ -621,7 +660,7 @@ mod tests {
 
     #[test]
     fn right_bit_shift() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 65;
 
@@ -641,7 +680,7 @@ mod tests {
 
     #[test]
     fn left_bit_shift() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 255;
 
@@ -661,7 +700,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_equals_const() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
 
@@ -681,7 +720,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_not_equals_const() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
 
@@ -701,7 +740,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_equals_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
 
@@ -721,7 +760,7 @@ mod tests {
 
     #[test]
     fn skip_if_x_not_equals_y() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
 
@@ -741,7 +780,7 @@ mod tests {
 
     #[test]
     fn call_and_return_from_subroutine() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
         let val_2 = 7;
@@ -767,7 +806,7 @@ mod tests {
 
     #[test]
     fn jump_to_address() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
         let val_2 = 7;
@@ -788,7 +827,7 @@ mod tests {
 
     #[test]
     fn jump_to_address_with_displacement() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1 = 5;
         let val_2 = 7;
@@ -809,7 +848,7 @@ mod tests {
 
     #[test]
     fn set_index_reg() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1: u16 = 5;
 
@@ -825,7 +864,7 @@ mod tests {
 
     #[test]
     fn add_x_to_index() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1: u16 = 5;
         let val_2: u8 = 7;
@@ -845,7 +884,7 @@ mod tests {
 
     #[test]
     fn set_index_to_char_font() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let val_1: u8 = 0xF;
 
@@ -863,7 +902,7 @@ mod tests {
 
     #[test]
     fn dump_registers_to_memory() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let vals: [u8; 16] = [16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1];
 
@@ -884,7 +923,7 @@ mod tests {
 
     #[test]
     fn load_registers_from_memory() {
-        let mut cpu = CPU::new(true, true, false);
+        let mut cpu = init_cpu();
 
         let vals: Vec<u8> = vec!(16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1);
 
