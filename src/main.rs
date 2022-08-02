@@ -1,3 +1,5 @@
+extern crate core;
+
 pub mod stack;
 pub mod screen;
 mod chip8;
@@ -19,73 +21,88 @@ const FPS: u64 = 60;
 fn main() -> Result<(), ApplicationError> {
     let mut chip8 = Chip8::new(true, true, false);
 
-    let ibm_opcodes: Vec<u16> = vec!(0x00e0, // clear screen
-                                     0xa22a, // preparing to print I
-                                     0x600c,
-                                     0x6108,
-                                     0xd01f, // printing I
-                                     0x7009, // move x 9 pixels to the right
-                                     0xa239, // prepare to print B (part 1)
-                                     0xd01f, // print B (part 1)
-                                     0xa248,
-                                     0x7008,
-                                     0xd01f,
-                                     0x7004,
-                                     0xa257,
-                                     0xd01f,
-                                     0x7008,
-                                     0xa266,
-                                     0xd01f,
-                                     0x7008,
-                                     0xa275,
-                                     0xd01f,
-                                     0x1228,
-                                     0xff00, // start of I
-                                     0xff00,
-                                     0x3c00,
-                                     0x3c00,
-                                     0x3c00,
-                                     0x3c00,
-                                     0xff00,
-                                     0xffff, // end of I (0xff * ff) -> start of B (part 1)
-                                     0x00ff,
-                                     0x0038,
-                                     0x003f,
-                                     0x003f,
-                                     0x0038,
-                                     0x00ff,
-                                     0x00ff, // end of B (part 1)
-                                     0x8000,
-                                     0xe000,
-                                     0xe000,
-                                     0x8000,
-                                     0x8000,
-                                     0xe000,
-                                     0xe000,
-                                     0x80f8,
-                                     0x00fc,
-                                     0x003e,
-                                     0x003f,
-                                     0x003b,
-                                     0x0039,
-                                     0x00f8,
-                                     0x00f8,
-                                     0x0300,
-                                     0x0700,
-                                     0x0f00,
-                                     0xbf00,
-                                     0xfb00,
-                                     0xf300,
-                                     0xe300,
-                                     0x43e0,
-                                     0x00e0,
-                                     0x0080,
-                                     0x0080,
-                                     0x0080,
-                                     0x0080,
-                                     0x00e0,
-                                     0x00e0);
-    chip8.load_opcodes_into_memory(&ibm_opcodes, 0x200);
+    // let ibm_opcodes: Vec<u16> = vec!(0x00e0, // clear screen
+    //                                  0xa22a, // preparing to print I
+    //                                  0x600c,
+    //                                  0x6108,
+    //                                  0xd01f, // printing I
+    //                                  0x7009, // move x 9 pixels to the right
+    //                                  0xa239, // prepare to print B (part 1)
+    //                                  0xd01f, // print B (part 1)
+    //                                  0xa248,
+    //                                  0x7008,
+    //                                  0xd01f,
+    //                                  0x7004,
+    //                                  0xa257,
+    //                                  0xd01f,
+    //                                  0x7008,
+    //                                  0xa266,
+    //                                  0xd01f,
+    //                                  0x7008,
+    //                                  0xa275,
+    //                                  0xd01f,
+    //                                  0x1228,
+    //                                  0xff00, // start of I
+    //                                  0xff00,
+    //                                  0x3c00,
+    //                                  0x3c00,
+    //                                  0x3c00,
+    //                                  0x3c00,
+    //                                  0xff00,
+    //                                  0xffff, // end of I (0xff * ff) -> start of B (part 1)
+    //                                  0x00ff,
+    //                                  0x0038,
+    //                                  0x003f,
+    //                                  0x003f,
+    //                                  0x0038,
+    //                                  0x00ff,
+    //                                  0x00ff, // end of B (part 1)
+    //                                  0x8000,
+    //                                  0xe000,
+    //                                  0xe000,
+    //                                  0x8000,
+    //                                  0x8000,
+    //                                  0xe000,
+    //                                  0xe000,
+    //                                  0x80f8,
+    //                                  0x00fc,
+    //                                  0x003e,
+    //                                  0x003f,
+    //                                  0x003b,
+    //                                  0x0039,
+    //                                  0x00f8,
+    //                                  0x00f8,
+    //                                  0x0300,
+    //                                  0x0700,
+    //                                  0x0f00,
+    //                                  0xbf00,
+    //                                  0xfb00,
+    //                                  0xf300,
+    //                                  0xe300,
+    //                                  0x43e0,
+    //                                  0x00e0,
+    //                                  0x0080,
+    //                                  0x0080,
+    //                                  0x0080,
+    //                                  0x0080,
+    //                                  0x00e0,
+    //                                  0x00e0);
+    // chip8.load_opcodes_into_memory(&ibm_opcodes, 0x200);
+
+    let sound_opcodes: Vec<u16> = vec!( 0x613C, // set V1 to 60
+                                        0x6202, // set V2 to 1
+                                        0x631E, // set V3 to 30
+                                        0xF318, // set sound timer to V3
+                                        0xF115, // set delay timer to V1
+                                        0xF007, // loop: set VX to delay timer
+                                        0x3000, // check if V0 == 0
+                                        0x120A, // if not -> jump back to loop:
+                                        0x8125, // decrement V1 by V2
+                                        0x411E, // check if V1 == 30
+                                        0x613C, // if yes -> set V1 to 60
+                                        0x1206, // if yes -> repeat program
+                                        );
+    chip8.load_opcodes_into_memory(&sound_opcodes, 0x200);
 
     run(&mut chip8, 20)?;
 

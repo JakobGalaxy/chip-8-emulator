@@ -1,4 +1,3 @@
-use std::{thread, time};
 use std::time::{Duration, Instant};
 use crate::keypad::Keypad;
 use crate::screen;
@@ -14,7 +13,7 @@ const FONT_START_ADDRESS: u16 = 0x050;
 /// specifies the address where the program is stored in memory
 pub const PROGRAM_START_ADDRESS: u16 = 0x200;
 
-const INSTRUCTION_EXEC_DURATION: Duration = Duration::from_nanos(100_000_000); // 1/10 of a second
+const INSTRUCTION_EXEC_DURATION: Duration = Duration::from_nanos(1_428_571); // 1_428_571
 
 #[derive(Debug)]
 pub enum Chip8Error {
@@ -48,6 +47,10 @@ pub struct Chip8 {
     /// aka. the I register (used to point at locations in memory)
     index_reg: u16,
 
+    delay_timer: u8,
+
+    sound_timer: u8,
+
     playing_sound: bool,
 
     exec_time: Duration,
@@ -68,6 +71,8 @@ impl Chip8 {
             screen: Screen::new(),
             keypad: Keypad::new(),
             index_reg: 0x0,
+            sound_timer: 0,
+            delay_timer: 0,
             playing_sound: false,
             exec_time: Duration::new(0, 0),
             last_exec: Instant::now(),
@@ -324,6 +329,18 @@ impl Chip8 {
         self.screen.clear();
     }
 
+    fn set_x_to_delay_timer(&mut self, x_red_id: u8) {
+        self.registers[x_red_id as usize] = self.delay_timer;
+    }
+
+    fn set_delay_timer_to_x(&mut self, x_reg_id: u8) {
+        self.delay_timer = self.registers[x_reg_id as usize];
+    }
+
+    fn set_sound_timer_to_x(&mut self, x_reg_id: u8) {
+        self.sound_timer = self.registers[x_reg_id as usize];
+    }
+
     pub fn playing_sound(&self) -> bool {
         return self.playing_sound;
     }
@@ -348,11 +365,11 @@ impl Chip8 {
 
     /// returns `false` if there was nothing to execute (empty instruction)
     pub fn exec_next_instruction(&mut self) -> Result<bool, Chip8Error> {
-        println!("time elapsed since last exec: {:?}", self.last_exec.elapsed());
-        self.last_exec = Instant::now();
-
         let opcode = self.fetch_instruction();
         self.program_counter += 2;
+
+        println!("time elapsed since last exec: {:?}; instruction: {:04x}", self.last_exec.elapsed(), opcode);
+        self.last_exec = Instant::now();
 
         // opcode group (4 bit) -> first nibble
         let opcode_group: u8 = ((opcode & 0xF000) >> 12) as u8;
@@ -417,6 +434,11 @@ impl Chip8 {
             (0xD, _, _, _) => self.display_sprite(x_reg_id, y_reg_id, nibble_const_val),
             (0x0, 0x0, 0xE, 0x0) => self.clear_screen(),
 
+            // timers
+            (0xF, _, 0x0, 0x7) => self.set_x_to_delay_timer(x_reg_id),
+            (0xF, _, 0x1, 0x5) => self.set_delay_timer_to_x(x_reg_id),
+            (0xF, _, 0x1, 0x8) => self.set_sound_timer_to_x(x_reg_id),
+
             _ => return Err(Chip8Error::InstructionNotImplemented(String::from(format!("there is no implementation for the instruction 0x{:04x} that was found at mem address 0x{:04x}!", opcode, self.program_counter - 2))))
         }
 
@@ -427,8 +449,24 @@ impl Chip8 {
         self.keypad = keypad;
     }
 
+    /// **NOTE:** should be executed 60 times a second -> every frame
+    fn decrement_timers(&mut self) {
+        // decrement delay timer
+        self.delay_timer -= if self.delay_timer >= 1 { 1 } else { 0 };
+
+        // decrement sound timer
+        if self.sound_timer <= 1 {
+            self.playing_sound = false;
+            self.sound_timer = 0;
+        } else {
+            self.playing_sound = true;
+            self.sound_timer -= 1;
+        }
+    }
+
     pub fn run_frame(&mut self, frame_duration: Duration) -> Result<(), Chip8Error> {
-        // TODO: update timers
+        // update timers
+        self.decrement_timers();
 
         self.exec_time += frame_duration;
 
