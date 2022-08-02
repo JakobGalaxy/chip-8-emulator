@@ -89,19 +89,12 @@ fn main() -> Result<(), ApplicationError> {
     //                                  0x00e0);
     // chip8.load_opcodes_into_memory(&ibm_opcodes, 0x200);
 
-    let sound_opcodes: Vec<u16> = vec!( 0x613C, // set V1 to 60
-                                        0x6202, // set V2 to 1
-                                        0x631E, // set V3 to 30
-                                        0xF318, // set sound timer to V3
-                                        0xF115, // set delay timer to V1
-                                        0xF007, // loop: set VX to delay timer
-                                        0x3000, // check if V0 == 0
-                                        0x120A, // if not -> jump back to loop:
-                                        0x8125, // decrement V1 by V2
-                                        0x411E, // check if V1 == 30
-                                        0x613C, // if yes -> set V1 to 60
-                                        0x1206, // if yes -> repeat program
-                                        );
+    let sound_opcodes: Vec<u16> = vec!( 0xF00A, // await any keypress
+                                        0x7001, // increase key by 1
+                                        0xE09E, // await specific keypress
+                                        0x1204, // jump back 1 line
+                                        0x1300, // jump to beginning
+        );
     chip8.load_opcodes_into_memory(&sound_opcodes, 0x200);
 
     run(&mut chip8, 20)?;
@@ -277,6 +270,11 @@ fn run(chip8: &mut Chip8, screen_scale: u32) -> Result<(), ApplicationError> {
     let mut last_frame_timestamp = Instant::now();
 
     loop {
+        // check if program has finished
+        if chip8.reached_end_of_file() {
+            break;
+        }
+
         // get input and load keypad
         if let Ok(keypad) = get_input(&mut event_pump) {
             chip8.load_keypad(keypad);

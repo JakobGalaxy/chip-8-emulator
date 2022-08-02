@@ -18,6 +18,7 @@ const INSTRUCTION_EXEC_DURATION: Duration = Duration::from_nanos(1_428_571); // 
 #[derive(Debug)]
 pub enum Chip8Error {
     InstructionNotImplemented(String),
+
 }
 
 pub struct Chip8 {
@@ -56,6 +57,8 @@ pub struct Chip8 {
     exec_time: Duration,
 
     last_exec: Instant,
+
+    reached_end_of_file: bool,
 }
 
 impl Chip8 {
@@ -76,54 +79,8 @@ impl Chip8 {
             playing_sound: false,
             exec_time: Duration::new(0, 0),
             last_exec: Instant::now(),
+            reached_end_of_file: false,
         };
-    }
-
-    pub fn load_bytes_into_memory(&mut self, bytes: &Vec<u8>, address: u16) {
-        for (idx, byte) in bytes.iter().enumerate() {
-            self.memory[(address as usize) + idx] = *byte;
-        }
-    }
-
-    pub fn load_opcode_into_memory(&mut self, opcode: u16, address: u16) {
-        let byte_1 = ((opcode & 0xFF00) >> 8) as u8;
-        let byte_2 = (opcode & 0x00FF) as u8;
-
-        self.memory[address as usize] = byte_1;
-        self.memory[(address + 1) as usize] = byte_2;
-    }
-
-    pub fn load_opcodes_into_memory(&mut self, opcodes: &Vec<u16>, mut address: u16) {
-        for opcode in opcodes {
-            self.load_opcode_into_memory(*opcode, address);
-            address += 2;
-        }
-    }
-
-    pub fn load_font_into_memory(&mut self, font_data: [[u8; 5]; 16]) {
-        let mut address: u16 = FONT_START_ADDRESS;
-        for character in font_data {
-            for byte in character {
-                self.memory[address as usize] = byte;
-                address += 1;
-            }
-        }
-
-        assert_eq!(address, 0xA0);
-    }
-
-    pub fn load_register(&mut self, reg_id: u8, value: u8) {
-        self.registers[reg_id as usize] = value;
-    }
-
-    pub fn load_index_reg(&mut self, address: u16) {
-        self.set_index_reg(address);
-    }
-
-    pub fn load_registers(&mut self, values: &[u8; 16]) {
-        for (reg_id, value) in values.iter().enumerate() {
-            self.registers[reg_id] = *value;
-        }
     }
 
     /// **NOTE:** in comparison to the `add_const_to_x()` method, this one **does** set a carry flag, thus affecting the VF register
@@ -341,12 +298,29 @@ impl Chip8 {
         self.sound_timer = self.registers[x_reg_id as usize];
     }
 
-    pub fn playing_sound(&self) -> bool {
-        return self.playing_sound;
+    fn skip_if_key_pressed(&mut self, x_reg_id: u8) {
+        let key_id: u8 = self.registers[x_reg_id as usize];
+        if self.keypad.check_key_state(key_id) {
+            self.program_counter += 2;
+        }
     }
 
-    pub fn get_frame_buffer(&self) -> &[[bool; (screen::WIDTH as usize)]; (screen::HEIGHT as usize)] {
-        return self.screen.get_frame_buffer();
+    fn skip_if_key_not_pressed(&mut self, x_reg_id: u8) {
+        let key_id: u8 = self.registers[x_reg_id as usize];
+        if !self.keypad.check_key_state(key_id) {
+            self.program_counter += 2;
+        }
+    }
+
+    fn await_keypress(&mut self, x_reg_id: u8) {
+        let keypress: Option<u8> = self.keypad.get_keypress();
+
+        if let Some(key_id) = keypress {
+            self.registers[x_reg_id as usize] = key_id;
+        } else {
+            // repeat instruction until keypress is found
+            self.program_counter -= 2;
+        }
     }
 
     fn fetch_instruction(&mut self) -> u16 {
@@ -364,7 +338,7 @@ impl Chip8 {
     }
 
     /// returns `false` if there was nothing to execute (empty instruction)
-    pub fn exec_next_instruction(&mut self) -> Result<bool, Chip8Error> {
+    pub fn exec_next_instruction(&mut self) -> Result<(), Chip8Error> {
         let opcode = self.fetch_instruction();
         self.program_counter += 2;
 
@@ -394,7 +368,7 @@ impl Chip8 {
 
         match (opcode_group, x_reg_id, y_reg_id, opcode_subgroup) {
             // stop execution on empty instruction
-            (0x0, 0x0, 0x0, 0x0) => return Ok(false),
+            (0x0, 0x0, 0x0, 0x0) => self.reached_end_of_file = true,
 
             // basic math
             (0x8, _, _, 0x4) => self.add_y_to_x(x_reg_id, y_reg_id),
@@ -439,10 +413,30 @@ impl Chip8 {
             (0xF, _, 0x1, 0x5) => self.set_delay_timer_to_x(x_reg_id),
             (0xF, _, 0x1, 0x8) => self.set_sound_timer_to_x(x_reg_id),
 
+            // key input
+            (0xE, _, 0x9, 0xE) => self.skip_if_key_pressed(x_reg_id),
+            (0xE, _, 0xA, 0x1) => self.skip_if_key_not_pressed(x_reg_id),
+            (0xF, _, 0x0, 0xA) => self.await_keypress(x_reg_id),
+
             _ => return Err(Chip8Error::InstructionNotImplemented(String::from(format!("there is no implementation for the instruction 0x{:04x} that was found at mem address 0x{:04x}!", opcode, self.program_counter - 2))))
         }
 
-        return Ok(true);
+        return Ok(());
+    }
+
+    pub fn run_frame(&mut self, frame_duration: Duration) -> Result<(), Chip8Error> {
+        // update timers
+        self.decrement_timers();
+
+        self.exec_time += frame_duration;
+
+        // run instructions
+        while self.exec_time >= INSTRUCTION_EXEC_DURATION {
+            self.exec_next_instruction()?;
+            self.exec_time -= INSTRUCTION_EXEC_DURATION;
+        }
+
+        return Ok(());
     }
 
     pub fn load_keypad(&mut self, keypad: Keypad) {
@@ -464,21 +458,71 @@ impl Chip8 {
         }
     }
 
-    pub fn run_frame(&mut self, frame_duration: Duration) -> Result<(), Chip8Error> {
-        // update timers
-        self.decrement_timers();
+    pub fn load_bytes_into_memory(&mut self, bytes: &Vec<u8>, address: u16) {
+        for (idx, byte) in bytes.iter().enumerate() {
+            self.memory[(address as usize) + idx] = *byte;
+        }
+    }
 
-        self.exec_time += frame_duration;
+    pub fn load_opcode_into_memory(&mut self, opcode: u16, address: u16) {
+        let byte_1 = ((opcode & 0xFF00) >> 8) as u8;
+        let byte_2 = (opcode & 0x00FF) as u8;
 
-        // run instructions
-        while self.exec_time >= INSTRUCTION_EXEC_DURATION {
-            if !self.exec_next_instruction()? {
-                return Ok(());
+        self.memory[address as usize] = byte_1;
+        self.memory[(address + 1) as usize] = byte_2;
+    }
+
+    pub fn load_opcodes_into_memory(&mut self, opcodes: &Vec<u16>, mut address: u16) {
+        for opcode in opcodes {
+            self.load_opcode_into_memory(*opcode, address);
+            address += 2;
+        }
+    }
+
+    pub fn load_font_into_memory(&mut self, font_data: [[u8; 5]; 16]) {
+        let mut address: u16 = FONT_START_ADDRESS;
+        for character in font_data {
+            for byte in character {
+                self.memory[address as usize] = byte;
+                address += 1;
             }
-            self.exec_time -= INSTRUCTION_EXEC_DURATION;
         }
 
-        return Ok(());
+        assert_eq!(address, 0xA0);
+    }
+
+    pub fn load_register(&mut self, reg_id: u8, value: u8) {
+        self.registers[reg_id as usize] = value;
+    }
+
+    pub fn load_index_reg(&mut self, address: u16) {
+        self.set_index_reg(address);
+    }
+
+    pub fn load_registers(&mut self, values: &[u8; 16]) {
+        for (reg_id, value) in values.iter().enumerate() {
+            self.registers[reg_id] = *value;
+        }
+    }
+
+    pub fn playing_sound(&self) -> bool {
+        return self.playing_sound;
+    }
+
+    pub fn reached_end_of_file(&self) -> bool {
+        return self.reached_end_of_file;
+    }
+
+    pub fn reset_state(&mut self) {
+        self.reached_end_of_file = false;
+        self.program_counter = PROGRAM_START_ADDRESS;
+        for val in self.registers.iter_mut() {
+            *val = 0;
+        }
+    }
+
+    pub fn get_frame_buffer(&self) -> &[[bool; (screen::WIDTH as usize)]; (screen::HEIGHT as usize)] {
+        return self.screen.get_frame_buffer();
     }
 
     pub fn print_debug_info(&self) {
