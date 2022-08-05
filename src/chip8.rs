@@ -1,8 +1,13 @@
+extern crate rand;
+
 use std::time::{Duration, Instant};
 use crate::keypad::Keypad;
 use crate::screen;
 use crate::stack::Stack;
 use crate::screen::Screen;
+use rand::thread_rng;
+use rand::Rng;
+use rand::rngs::ThreadRng;
 
 /// specifies the ID of the VF register which is often used for flags
 const FLAG_REG_ID: u8 = 0xF;
@@ -59,6 +64,8 @@ pub struct Chip8 {
     last_exec: Instant,
 
     reached_end_of_file: bool,
+
+    random_generator: ThreadRng,
 }
 
 impl Chip8 {
@@ -80,6 +87,7 @@ impl Chip8 {
             exec_time: Duration::new(0, 0),
             last_exec: Instant::now(),
             reached_end_of_file: false,
+            random_generator: thread_rng(),
         };
     }
 
@@ -312,7 +320,7 @@ impl Chip8 {
         }
     }
 
-    fn await_keypress(&mut self, x_reg_id: u8) {
+    fn await_keypress(&mut self, x_reg_id: u8, ) {
         let keypress: Option<u8> = self.keypad.get_keypress();
 
         if let Some(key_id) = keypress {
@@ -321,6 +329,15 @@ impl Chip8 {
             // repeat instruction until keypress is found
             self.program_counter -= 2;
         }
+    }
+
+    fn set_x_to_random_number(&mut self, x_reg_id: u8, const_val: u8) {
+        // generate random number between 0 and 255
+        let rand_val: u8 = self.random_generator.gen();
+
+        println!("random: {}; const: {}", rand_val, const_val);
+
+        self.registers[x_reg_id as usize] = rand_val & const_val;
     }
 
     fn fetch_instruction(&mut self) -> u16 {
@@ -417,6 +434,9 @@ impl Chip8 {
             (0xE, _, 0x9, 0xE) => self.skip_if_key_pressed(x_reg_id),
             (0xE, _, 0xA, 0x1) => self.skip_if_key_not_pressed(x_reg_id),
             (0xF, _, 0x0, 0xA) => self.await_keypress(x_reg_id),
+
+            // random generator
+            (0xC, _, _, _) => self.set_x_to_random_number(x_reg_id, const_val),
 
             _ => return Err(Chip8Error::InstructionNotImplemented(String::from(format!("there is no implementation for the instruction 0x{:04x} that was found at mem address 0x{:04x}!", opcode, self.program_counter - 2))))
         }
@@ -549,9 +569,8 @@ mod tests {
     }
 
     fn run_emulator(chip8: &mut Chip8) {
-        let mut continue_execution: bool = true;
-        while continue_execution {
-            continue_execution = chip8.exec_next_instruction().expect("an error occurred during emulator execution");
+        while !chip8.reached_end_of_file {
+            chip8.exec_next_instruction().expect("an error occurred during emulator execution");
         }
     }
 
