@@ -320,7 +320,7 @@ impl Chip8 {
         }
     }
 
-    fn await_keypress(&mut self, x_reg_id: u8, ) {
+    fn await_keypress(&mut self, x_reg_id: u8) {
         let keypress: Option<u8> = self.keypad.get_keypress();
 
         if let Some(key_id) = keypress {
@@ -338,6 +338,22 @@ impl Chip8 {
         println!("random: {}; const: {}", rand_val, const_val);
 
         self.registers[x_reg_id as usize] = rand_val & const_val;
+    }
+
+    fn store_binary_coded_decimal_of_x(&mut self, x_reg_id: u8) {
+        let mut x_val = self.registers[x_reg_id as usize];
+
+        // partition the value into its parts
+        let hundreds: u8 = x_val / 100;
+        x_val %= 100;
+        let tens: u8 = x_val / 10;
+        x_val %= 10;
+        let ones: u8 = x_val;
+
+        // store parts
+        self.memory[self.index_reg as usize] = hundreds;
+        self.memory[(self.index_reg as usize) + 1] = tens;
+        self.memory[(self.index_reg as usize) + 2] = ones;
     }
 
     fn fetch_instruction(&mut self) -> u16 {
@@ -437,6 +453,9 @@ impl Chip8 {
 
             // random generator
             (0xC, _, _, _) => self.set_x_to_random_number(x_reg_id, const_val),
+
+            // binary-coded decimal
+            (0xF, _, 0x3, 0x3) => self.store_binary_coded_decimal_of_x(x_reg_id),
 
             _ => return Err(Chip8Error::InstructionNotImplemented(String::from(format!("there is no implementation for the instruction 0x{:04x} that was found at mem address 0x{:04x}!", opcode, self.program_counter - 2))))
         }
@@ -1098,5 +1117,24 @@ mod tests {
         for (idx, val) in vals.iter().enumerate() {
             assert_eq!(chip8.registers[idx], *val, "failed to correctly load register V{:1X} from memory", idx);
         }
+    }
+
+    #[test]
+    fn store_binary_coded_decimal_of_x() {
+        let mut chip8 = init_emulator();
+
+        let val_1 = 123;
+
+        // load registers
+        chip8.load_register(0, val_1);
+
+        // load opcodes
+        chip8.load_opcode_into_memory(0xF033, PROGRAM_START_ADDRESS);
+        run_emulator(&mut chip8);
+
+        // verify result
+        assert_eq!(chip8.memory[chip8.index_reg as usize], 1, "failed to correctly extract the decimal hundreds; value: {}, hundreds: {}", val_1, chip8.memory[chip8.index_reg as usize]);
+        assert_eq!(chip8.memory[(chip8.index_reg as usize) + 1], 2, "failed to correctly extract the decimal tens; value: {}, tens: {}", val_1, chip8.memory[(chip8.index_reg as usize) + 1]);
+        assert_eq!(chip8.memory[(chip8.index_reg as usize) + 2], 3, "failed to correctly extract the decimal ones; value: {}, ones: {}", val_1, chip8.memory[(chip8.index_reg as usize) + 2]);
     }
 }
