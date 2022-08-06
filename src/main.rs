@@ -2,110 +2,74 @@ extern crate core;
 
 pub mod stack;
 pub mod screen;
+mod config;
 mod chip8;
 mod keypad;
 
+use std::fs::File;
+use std::io;
+use std::io::Read;
+use std::path::Path;
 use std::time::{Duration, Instant};
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
 use sdl2::pixels::Color;
-use sdl2::render::{SdlError, WindowCanvas};
-use sdl2::{EventPump, init, Sdl};
+use sdl2::render::{WindowCanvas};
+use sdl2::{EventPump, Sdl};
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::rect::Rect;
+use confy;
 use chip8::Chip8;
-use crate::keypad::Keypad;
+use keypad::Keypad;
+use crate::config::ApplicationConfig;
 
+// GUI constants
 const FPS: u64 = 60;
 
 fn main() -> Result<(), ApplicationError> {
+
+    // load config
+    let config = config::load_config().map_err(|err| ApplicationError::Config(err))?;
+
     let mut chip8 = Chip8::new(true, true, false);
 
-    // let ibm_opcodes: Vec<u16> = vec!(0x00e0, // clear screen
-    //                                  0xa22a, // preparing to print I
-    //                                  0x600c,
-    //                                  0x6108,
-    //                                  0xd01f, // printing I
-    //                                  0x7009, // move x 9 pixels to the right
-    //                                  0xa239, // prepare to print B (part 1)
-    //                                  0xd01f, // print B (part 1)
-    //                                  0xa248,
-    //                                  0x7008,
-    //                                  0xd01f,
-    //                                  0x7004,
-    //                                  0xa257,
-    //                                  0xd01f,
-    //                                  0x7008,
-    //                                  0xa266,
-    //                                  0xd01f,
-    //                                  0x7008,
-    //                                  0xa275,
-    //                                  0xd01f,
-    //                                  0x1228,
-    //                                  0xff00, // start of I
-    //                                  0xff00,
-    //                                  0x3c00,
-    //                                  0x3c00,
-    //                                  0x3c00,
-    //                                  0x3c00,
-    //                                  0xff00,
-    //                                  0xffff, // end of I (0xff * ff) -> start of B (part 1)
-    //                                  0x00ff,
-    //                                  0x0038,
-    //                                  0x003f,
-    //                                  0x003f,
-    //                                  0x0038,
-    //                                  0x00ff,
-    //                                  0x00ff, // end of B (part 1)
-    //                                  0x8000,
-    //                                  0xe000,
-    //                                  0xe000,
-    //                                  0x8000,
-    //                                  0x8000,
-    //                                  0xe000,
-    //                                  0xe000,
-    //                                  0x80f8,
-    //                                  0x00fc,
-    //                                  0x003e,
-    //                                  0x003f,
-    //                                  0x003b,
-    //                                  0x0039,
-    //                                  0x00f8,
-    //                                  0x00f8,
-    //                                  0x0300,
-    //                                  0x0700,
-    //                                  0x0f00,
-    //                                  0xbf00,
-    //                                  0xfb00,
-    //                                  0xf300,
-    //                                  0xe300,
-    //                                  0x43e0,
-    //                                  0x00e0,
-    //                                  0x0080,
-    //                                  0x0080,
-    //                                  0x0080,
-    //                                  0x0080,
-    //                                  0x00e0,
-    //                                  0x00e0);
-    // chip8.load_opcodes_into_memory(&ibm_opcodes, 0x200);
+    // load fonts data
+    let font_data: Vec<u8> = load_binary_file(&config.font_path)?;
+    chip8.load_font(&font_data).map_err(|err| ApplicationError::Chip8(err))?;
 
-    let sound_opcodes: Vec<u16> = vec!( 0xF00A, // await any keypress
-                                        0x7001, // increase key by 1
-                                        0xE09E, // await specific keypress
-                                        0x1204, // jump back 1 line
-                                        0x1300, // jump to beginning
-        );
-    chip8.load_opcodes_into_memory(&sound_opcodes, 0x200);
+    // load program
+    let program_data: Vec<u8> = load_binary_file(&config.program_path)?;
+    chip8.load_program(&program_data).map_err(|err| ApplicationError::Chip8(err))?;
 
-    run(&mut chip8, 20)?;
+    // let sound_opcodes: Vec<u16> = vec!(0xF00A, // await any keypress
+    //                                    0x7001, // increase key by 1
+    //                                    0xE09E, // await specific keypress
+    //                                    0x1204, // jump back 1 line
+    //                                    0x1300, // jump to beginning
+    // );
+    // chip8.load_opcodes_into_memory(&sound_opcodes, 0x200);
+
+    run(&mut chip8, config)?;
 
     return Ok(());
+}
+
+fn load_binary_file(path: &str) -> Result<Vec<u8>, ApplicationError> {
+    let mut file = File::open(Path::new(path)).map_err(|err| ApplicationError::IO(err))?;
+
+    let mut data: Vec<u8> = vec!();
+
+    file.read_to_end(&mut data).map_err(|err| ApplicationError::IO(err))?;
+
+    return Ok(data);
 }
 
 #[derive(Debug)]
 enum ApplicationError {
     Sdl(String),
     Chip8(chip8::Chip8Error),
+    Config(confy::ConfyError),
+    IO(io::Error),
 }
 
 struct SquareWave {
@@ -259,11 +223,11 @@ fn update_screen(canvas: &mut WindowCanvas, chip8: &Chip8, screen_scale: u32) {
     canvas.present();
 }
 
-fn run(chip8: &mut Chip8, screen_scale: u32) -> Result<(), ApplicationError> {
+fn run(chip8: &mut Chip8, config: ApplicationConfig) -> Result<(), ApplicationError> {
     let sdl_context = sdl2::init().map_err(|err| ApplicationError::Sdl(err))?;
 
     let audio_device = init_audio_device(&sdl_context)?;
-    let mut canvas = init_canvas(&sdl_context, screen_scale)?;
+    let mut canvas = init_canvas(&sdl_context, config.screen_scale)?;
     let mut event_pump = init_event_pump(&sdl_context)?;
 
     let frame_duration = Duration::from_nanos(1_000_000_000 / FPS);
@@ -289,7 +253,7 @@ fn run(chip8: &mut Chip8, screen_scale: u32) -> Result<(), ApplicationError> {
         update_audio_device(&audio_device, &chip8);
 
         // update screen
-        update_screen(&mut canvas, &chip8, screen_scale);
+        update_screen(&mut canvas, &chip8, config.screen_scale);
 
         // wait for frame duration to pass
         let sleep_duration = frame_duration.checked_sub(last_frame_timestamp.elapsed()).unwrap_or(Duration::new(0, 0));

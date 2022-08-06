@@ -6,8 +6,16 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+# used for generating random numbers
 rand = "0.7.3"
 
+# used for serializing and deserializing the config
+serde = { version = "1", features = ["derive"] }
+
+# used for loading and storing the config file
+confy = "0.4.0"
+
+# used for GUI
 [dependencies.sdl2]
 version = "0.35"
 default-features = true

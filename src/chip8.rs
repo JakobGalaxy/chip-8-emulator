@@ -12,7 +12,7 @@ use rand::rngs::ThreadRng;
 /// specifies the ID of the VF register which is often used for flags
 const FLAG_REG_ID: u8 = 0xF;
 
-/// specifies the address where the font data is stored in memory
+/// specifies the address where the fonts data is stored in memory
 const FONT_START_ADDRESS: u16 = 0x050;
 
 /// specifies the address where the program is stored in memory
@@ -20,10 +20,13 @@ pub const PROGRAM_START_ADDRESS: u16 = 0x200;
 
 const INSTRUCTION_EXEC_DURATION: Duration = Duration::from_nanos(1_428_571); // 1_428_571
 
+const FONT_DATA_SIZE: usize = 80; // 5 rows per char * 16 chars
+
 #[derive(Debug)]
 pub enum Chip8Error {
     InstructionNotImplemented(String),
-
+    MemoryOverflow(String),
+    InvalidFontData(String),
 }
 
 pub struct Chip8 {
@@ -470,7 +473,7 @@ impl Chip8 {
         self.exec_time += frame_duration;
 
         // run instructions
-        while self.exec_time >= INSTRUCTION_EXEC_DURATION {
+        while self.exec_time >= INSTRUCTION_EXEC_DURATION && !self.reached_end_of_file {
             self.exec_next_instruction()?;
             self.exec_time -= INSTRUCTION_EXEC_DURATION;
         }
@@ -497,9 +500,9 @@ impl Chip8 {
         }
     }
 
-    pub fn load_bytes_into_memory(&mut self, bytes: &Vec<u8>, address: u16) {
-        for (idx, byte) in bytes.iter().enumerate() {
-            self.memory[(address as usize) + idx] = *byte;
+    pub fn load_bytes_into_memory(&mut self, data: &Vec<u8>, address: u16) {
+        for (offset, byte) in data.iter().enumerate() {
+            self.memory[(address as usize) + offset] = *byte;
         }
     }
 
@@ -518,16 +521,24 @@ impl Chip8 {
         }
     }
 
-    pub fn load_font_into_memory(&mut self, font_data: [[u8; 5]; 16]) {
-        let mut address: u16 = FONT_START_ADDRESS;
-        for character in font_data {
-            for byte in character {
-                self.memory[address as usize] = byte;
-                address += 1;
-            }
+    pub fn load_program(&mut self, program_data: &Vec<u8>) -> Result<(), Chip8Error> {
+        if program_data.len() > (self.memory.len() - (PROGRAM_START_ADDRESS as usize)) {
+            return Err(Chip8Error::MemoryOverflow(String::from("the program does not fit into its predefined memory space")));
         }
 
-        assert_eq!(address, 0xA0);
+        self.load_bytes_into_memory(program_data, PROGRAM_START_ADDRESS);
+
+        return Ok(());
+    }
+
+    pub fn load_font(&mut self, font_data: &Vec<u8>) -> Result<(), Chip8Error> {
+        if font_data.len() != FONT_DATA_SIZE {
+            return Err(Chip8Error::InvalidFontData(String::from("the fonts data does not fit into its predefined memory space")));
+        }
+
+        self.load_bytes_into_memory(font_data, FONT_START_ADDRESS);
+
+        return Ok(());
     }
 
     pub fn load_register(&mut self, reg_id: u8, value: u8) {
@@ -1072,7 +1083,7 @@ mod tests {
         run_emulator(&mut chip8);
 
         // verify result
-        assert_eq!(chip8.index_reg, FONT_START_ADDRESS + (15 * 5), "failed to correctly set the index register to the font location; index_reg: 0x{:04x}; character: 0x{:02x}", chip8.index_reg, val_1);
+        assert_eq!(chip8.index_reg, FONT_START_ADDRESS + (15 * 5), "failed to correctly set the index register to the fonts location; index_reg: 0x{:04x}; character: 0x{:02x}", chip8.index_reg, val_1);
     }
 
     #[test]
