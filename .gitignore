@@ -11,6 +11,9 @@ SDL2test.lib
 notes/todo.md
 
 # test folders
-programs
-fonts
-config
+programs/*
+fonts/*
+config/*
+
+!fonts/custom.font
+!programs/welcome.ch8

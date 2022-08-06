@@ -54,6 +54,7 @@ You can also use `Y` instead of `Z`.
 
 Thanks to all the authors of these resources for their great effort!
 
+- [Rust in Action](https://github.com/rust-in-action)
 - [Guide to making a CHIP-8 emulator - Tobias V. Langhoff](https://tobiasvl.github.io/blog/write-a-chip-8-emulator/)
 - [CHIP-8 emulator in Rust. Part 1 - Dhole's blog](https://dhole.github.io/post/chip8_emu_1/)
 - [Simple DirectMedia Layer - Wikipedia](https://en.wikipedia.org/wiki/Simple_DirectMedia_Layer)
@@ -83,7 +84,7 @@ Thanks to all the people who wrote these programs!
 - [maze](https://github.com/cj1128/chip8-emulator/blob/master/rom/Maze)
 - [heart monitor](https://github.com/mattmikolay/chip-8/blob/master/heartmonitor/heart_monitor.ch8)
 - [morse code](https://github.com/mattmikolay/chip-8/blob/master/morsecode/morse_demo.ch8)
-
+- [IBM logo](https://github.com/loktar00/chip8/blob/master/roms/IBM%20Logo.ch8)
 ### games
 
 - [pong](https://github.com/cj1128/chip8-emulator/blob/master/rom/PONG)
