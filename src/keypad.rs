@@ -1,5 +1,6 @@
 const NUM_KEYS: u32 = 16;
 
+#[derive(Clone)]
 pub struct Keypad {
     key_states: [bool; (NUM_KEYS as usize)],
 }

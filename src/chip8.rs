@@ -338,8 +338,6 @@ impl Chip8 {
         // generate random number between 0 and 255
         let rand_val: u8 = self.random_generator.gen();
 
-        println!("random: {}; const: {}", rand_val, const_val);
-
         self.registers[x_reg_id as usize] = rand_val & const_val;
     }
 
@@ -378,7 +376,7 @@ impl Chip8 {
         let opcode = self.fetch_instruction();
         self.program_counter += 2;
 
-        println!("time elapsed since last exec: {:?}; instruction: {:04x}", self.last_exec.elapsed(), opcode);
+        // println!("time elapsed since last exec: {:?}; instruction: {:04x}", self.last_exec.elapsed(), opcode);
         self.last_exec = Instant::now();
 
         // opcode group (4 bit) -> first nibble
@@ -481,8 +479,8 @@ impl Chip8 {
         return Ok(());
     }
 
-    pub fn load_keypad(&mut self, keypad: Keypad) {
-        self.keypad = keypad;
+    pub fn load_keypad(&mut self, keypad: &Keypad) {
+        self.keypad = keypad.clone();
     }
 
     /// **NOTE:** should be executed 60 times a second -> every frame

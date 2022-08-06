@@ -104,8 +104,6 @@ fn init_audio_device(sdl_context: &Sdl) -> Result<AudioDevice<SquareWave>, Appli
     };
 
     let audio_device = audio_subsystem.open_playback(None, &audio_device_spec, |spec| {
-        println!("audio spec: {:?}", spec);
-
         SquareWave {
             phase_inc: 440.0 / spec.freq as f32,
             phase: 0.0,
@@ -143,7 +141,7 @@ fn init_event_pump(sdl_context: &Sdl) -> Result<EventPump, ApplicationError> {
     return Ok(event_pump);
 }
 
-fn get_input(event_pump: &mut EventPump) -> Result<Keypad, ()> {
+fn get_input(event_pump: &mut EventPump, keypad: &mut Keypad) -> Result<(), ()> {
     // original keypad
     // 1 2 3 C
     // 4 5 6 D
@@ -155,8 +153,6 @@ fn get_input(event_pump: &mut EventPump) -> Result<Keypad, ()> {
     // Q W E R
     // A S D F
     // Z X C V (Z can also be Y)
-
-    let mut keypad = Keypad::new();
 
     for event in event_pump.poll_iter() {
         match event {
@@ -187,12 +183,36 @@ fn get_input(event_pump: &mut EventPump) -> Result<Keypad, ()> {
                     Keycode::V => keypad.set_key(0xF),
                     _ => {}
                 }
-            }
-            _ => {}
+            },
+            Event::KeyUp {
+                keycode: Some(keycode),
+                ..
+            } => {
+                match keycode {
+                    Keycode::Num1 => keypad.unset_key(0x1),
+                    Keycode::Num2 => keypad.unset_key(0x2),
+                    Keycode::Num3 => keypad.unset_key(0x3),
+                    Keycode::Num4 => keypad.unset_key(0xC),
+                    Keycode::Q => keypad.unset_key(0x4),
+                    Keycode::W => keypad.unset_key(0x5),
+                    Keycode::E => keypad.unset_key(0x6),
+                    Keycode::R => keypad.unset_key(0xD),
+                    Keycode::A => keypad.unset_key(0x7),
+                    Keycode::S => keypad.unset_key(0x8),
+                    Keycode::D => keypad.unset_key(0x9),
+                    Keycode::F => keypad.unset_key(0xE),
+                    Keycode::Z | Keycode::Y => keypad.unset_key(0xA),
+                    Keycode::X => keypad.unset_key(0x0),
+                    Keycode::C => keypad.unset_key(0xB),
+                    Keycode::V => keypad.unset_key(0xF),
+                    _ => {}
+                }
+            },
+            _ => {},
         }
     }
 
-    return Ok(keypad);
+    return Ok(());
 }
 
 fn update_audio_device(audio_device: &AudioDevice<SquareWave>, chip8: &Chip8) {
@@ -233,6 +253,8 @@ fn run(chip8: &mut Chip8, config: ApplicationConfig) -> Result<(), ApplicationEr
     let frame_duration = Duration::from_nanos(1_000_000_000 / FPS);
     let mut last_frame_timestamp = Instant::now();
 
+    let mut keypad = Keypad::new();
+
     loop {
         // check if program has finished
         if chip8.reached_end_of_file() {
@@ -240,8 +262,8 @@ fn run(chip8: &mut Chip8, config: ApplicationConfig) -> Result<(), ApplicationEr
         }
 
         // get input and load keypad
-        if let Ok(keypad) = get_input(&mut event_pump) {
-            chip8.load_keypad(keypad);
+        if let Ok(_) = get_input(&mut event_pump, &mut keypad) {
+            chip8.load_keypad(&keypad);
         } else {
             break;
         }
