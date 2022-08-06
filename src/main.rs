@@ -7,8 +7,7 @@ mod chip8;
 mod keypad;
 
 use std::fs::File;
-use std::io;
-use std::io::Read;
+use std::io::{self, Read};
 use std::path::Path;
 use std::time::{Duration, Instant};
 use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
@@ -40,14 +39,6 @@ fn main() -> Result<(), ApplicationError> {
     // load program
     let program_data: Vec<u8> = load_binary_file(&config.program_path)?;
     chip8.load_program(&program_data).map_err(|err| ApplicationError::Chip8(err))?;
-
-    // let sound_opcodes: Vec<u16> = vec!(0xF00A, // await any keypress
-    //                                    0x7001, // increase key by 1
-    //                                    0xE09E, // await specific keypress
-    //                                    0x1204, // jump back 1 line
-    //                                    0x1300, // jump to beginning
-    // );
-    // chip8.load_opcodes_into_memory(&sound_opcodes, 0x200);
 
     run(&mut chip8, config)?;
 
